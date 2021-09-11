@@ -1,0 +1,95 @@
+free c : channel.
+free sc : channel[private].
+type key.
+
+(*Values*)
+free Tx : bitstring[private].
+free S : bitstring[private].
+free C : bitstring.
+free mk : bitstring[private].
+
+
+(*encryption*)
+fun senc(bitstring,key):bitstring.
+reduc forall m : bitstring, k : key; sedc(senc(m,k),k) = m.
+
+(*hash*)
+fun hash(bitstring):bitstring.
+fun hashWithKey(bitstring,key):bitstring.
+fun hashToKey(bitstring,bitstring):key.
+fun hash2input(bitstring,bitstring):bitstring.
+fun hash2inputWithKey(bitstring,key,bitstring):bitstring.
+fun hash3input(bitstring,bitstring,bitstring):bitstring.
+fun PUF(bitstring):bitstring[private].
+
+(*events*)
+event serverSendM2.
+event tagVerifyM2.
+event tagSendM3.
+event serverVerifyM3.	
+event endSetup.
+event startAuthentication.
+event endAuthentication.
+
+(*queries*)
+query attacker(Tx).
+query attacker(S).
+query attacker(mk).
+query inj-event(tagVerifyM2)==>inj-event(serverSendM2).
+query inj-event(serverVerifyM3)==>inj-event(tagSendM3).
+
+
+(*tag*)
+let tag()=
+	(*step1*)
+	out(sc,Tx);
+
+	(*step3*)
+	in(sc,(S:bitstring,TempTx:bitstring,C:bitstring));
+	let R = PUF(C) in
+	out(sc,R);
+
+	(*step5*)
+	out(c,TempTx);
+
+	(*step7*)
+	in(c,(Delta:bitstring,H:bitstring));
+	let K=hashToKey(TempTx,S) in
+	let (=H)=hashWithKey(Delta,K) in
+	event tagVerifyM2;
+	let C=sedc(Delta,K) in
+	let R = PUF(C) in
+	let X = senc(R,K) in
+	event tagSendM3;
+	out(c,X).
+
+
+(*server*)
+let server()=
+
+	(*step2*)
+	in(sc,Tx:bitstring);
+	let TempTx = hash3input(S,Tx,mk) in
+	out(sc,(S,TempTx,C));
+
+	(*step4*)
+	in(sc,R:bitstring);
+	event endSetup;
+
+
+	(*step6*)
+	in(c,TempTx:bitstring);
+	let K=hashToKey(TempTx,S) in
+	let Delta=senc(C,K) in
+	let H=hashWithKey(Delta,K) in
+	event serverSendM2;
+	out(c,(Delta,H));
+
+	(*step8*)
+	in(c,X:bitstring);
+	let (=R) = sedc(X,K) in
+	event serverVerifyM3;
+	event endAuthentication.
+
+process
+	tag()|server()
